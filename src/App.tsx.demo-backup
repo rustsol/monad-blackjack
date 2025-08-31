@@ -1,0 +1,209 @@
+import React, { useEffect, useState } from 'react';
+import { Provider } from 'react-redux';
+import { PrivyProvider } from '@privy-io/react-auth';
+import { WagmiProvider } from '@privy-io/wagmi';
+import { store } from './store';
+import { usePrivyAuth } from './hooks/usePrivyAuth';
+import { useContractEvents } from './hooks/useContractEvents';
+import { contractService } from './utils/contractService';
+import AuthPage from './components/AuthPage';
+import GameBoard from './components/GameBoard';
+import PlayerStats from './components/PlayerStats';
+import Leaderboard from './components/Leaderboard';
+import { useWalletClient } from 'wagmi';
+import { walletClientToSigner } from './utils/walletClientToSigner';
+import './index.css';
+
+// Main App Component
+const AppContent: React.FC = () => {
+  const { isAuthenticated, walletAddress, needsUsernameRegistration, logout } = usePrivyAuth();
+  const [activeTab, setActiveTab] = useState<'game' | 'stats' | 'leaderboard'>('game');
+  const [isContractInitialized, setIsContractInitialized] = useState(false);
+  const { data: walletClient } = useWalletClient();
+
+  // Initialize contract service when wallet is connected
+  useEffect(() => {
+    const initializeContract = async () => {
+      if (walletClient && walletAddress) {
+        try {
+          const signer = walletClientToSigner(walletClient);
+          await contractService.initialize(signer);
+          setIsContractInitialized(true);
+        } catch (error) {
+          console.error('Failed to initialize contract:', error);
+        }
+      }
+    };
+
+    initializeContract();
+  }, [walletClient, walletAddress]);
+
+  // Setup contract event listeners
+  useContractEvents(walletAddress, isContractInitialized);
+
+  if (!isAuthenticated || !walletAddress) {
+    return <AuthPage />;
+  }
+
+  return (
+    <div className="app">
+      {/* Header */}
+      <header className="app-header">
+        <div className="header-content">
+          <div className="header-left">
+            <h1 className="app-title">🎴 Monad Blackjack</h1>
+            <span className="chain-indicator">⛓️ Monad Testnet</span>
+          </div>
+          
+          <div className="header-right">
+            <div className="wallet-info">
+              <span className="wallet-address">
+                {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              </span>
+              <button className="logout-btn" onClick={logout}>
+                🚪 Logout
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        {needsUsernameRegistration && (
+          <div className="username-warning">
+            <span>⚠️ Complete your Monad Games ID registration to appear on leaderboards!</span>
+            <a 
+              href="https://monad-games-id-site.vercel.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="register-link"
+            >
+              Register Now
+            </a>
+          </div>
+        )}
+      </header>
+
+      {/* Navigation */}
+      <nav className="app-nav">
+        <div className="nav-tabs">
+          <button
+            className={`nav-tab ${activeTab === 'game' ? 'active' : ''}`}
+            onClick={() => setActiveTab('game')}
+          >
+            🎯 Game
+          </button>
+          <button
+            className={`nav-tab ${activeTab === 'stats' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stats')}
+          >
+            📊 Stats
+          </button>
+          <button
+            className={`nav-tab ${activeTab === 'leaderboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('leaderboard')}
+          >
+            🏆 Leaderboard
+          </button>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="app-main">
+        {!isContractInitialized && (
+          <div className="initialization-overlay">
+            <div className="initialization-content">
+              <div className="loading-spinner">⏳</div>
+              <p>Initializing blockchain connection...</p>
+            </div>
+          </div>
+        )}
+        
+        {isContractInitialized && (
+          <>
+            {activeTab === 'game' && <GameBoard walletAddress={walletAddress} />}
+            {activeTab === 'stats' && <PlayerStats />}
+            {activeTab === 'leaderboard' && <Leaderboard />}
+          </>
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="app-footer">
+        <div className="footer-content">
+          <p>🎮 Built for Monad Games ID Mission 7</p>
+          <p>⛓️ Every move recorded on blockchain</p>
+          <div className="footer-links">
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+              📂 Source Code
+            </a>
+            <a href="https://testnet.monadexplorer.com" target="_blank" rel="noopener noreferrer">
+              🔍 Explorer
+            </a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+// Wagmi configuration for Monad testnet
+const wagmiConfig = {
+  chains: [{
+    id: 41454,
+    name: 'Monad Testnet',
+    network: 'monad-testnet',
+    nativeCurrency: {
+      decimals: 18,
+      name: 'MON',
+      symbol: 'MON',
+    },
+    rpcUrls: {
+      public: { http: ['https://testnet-rpc.monad.xyz'] },
+      default: { http: ['https://testnet-rpc.monad.xyz'] },
+    },
+    blockExplorers: {
+      default: { name: 'Monad Explorer', url: 'https://testnet.monadexplorer.com' },
+    },
+  }],
+};
+
+const App: React.FC = () => {
+  const privyAppId = process.env.REACT_APP_PRIVY_APP_ID;
+  
+  if (!privyAppId) {
+    return (
+      <div className="error-container">
+        <h1>Configuration Error</h1>
+        <p>Please set REACT_APP_PRIVY_APP_ID in your .env file</p>
+      </div>
+    );
+  }
+
+  return (
+    <Provider store={store}>
+      <PrivyProvider
+        appId={privyAppId}
+        config={{
+          loginMethodsAndOrder: ['wallet'],
+          appearance: {
+            theme: 'dark',
+            accentColor: '#6366f1',
+            logo: '🎴',
+          },
+          embeddedWallets: {
+            createOnLogin: 'users-without-wallets',
+            requireUserPasswordOnCreate: true,
+          },
+          mfa: {
+            noPromptOnMfaRequired: false,
+          }
+        }}
+      >
+        <WagmiProvider config={wagmiConfig}>
+          <AppContent />
+        </WagmiProvider>
+      </PrivyProvider>
+    </Provider>
+  );
+};
+
+export default App;
